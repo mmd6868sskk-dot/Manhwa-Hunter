@@ -2,8 +2,7 @@ name: Build Manhwa Hunter APK
 'on':
 workflow_dispatch:
 push:
-branches:
-- main
+branches: [main]
 
 jobs:
 build:
@@ -19,9 +18,10 @@ uses: actions/checkout@v4
       java-version: '17'
 
   - name: Extract updated project
-    run: |
-      unzip -o Manhwa_Hunter_v2_Project.zip -d /tmp/manhwa-project
-      cp -a /tmp/manhwa-project/. .
+    run: unzip -o Manhwa_Hunter_v2_Project.zip -d /tmp/manhwa-project
+
+  - name: Copy project files
+    run: cp -a /tmp/manhwa-project/. .
 
   - name: Build APK
     run: gradle assembleDebug
