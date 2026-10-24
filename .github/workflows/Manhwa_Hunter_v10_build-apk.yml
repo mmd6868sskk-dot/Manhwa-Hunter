@@ -1,0 +1,100 @@
+name: Build Manhwa Hunter v10 APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Locate or extract Manhwa Hunter project
+        id: project
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROJECT_PATH=""
+
+          # Prefer an Android project already checked into the repository.
+          while IFS= read -r settings_file; do
+            candidate="$(dirname "$settings_file")"
+            if [[ -f "$candidate/app/build.gradle.kts" ]]; then
+              PROJECT_PATH="$candidate"
+              break
+            fi
+          done < <(find . -type f -name settings.gradle.kts -not -path './.git/*' -print)
+
+          # Otherwise extract the exact v10 project archive from the repository root/tree.
+          if [[ -z "$PROJECT_PATH" ]]; then
+            ZIP_PATH=""
+            while IFS= read -r zip_file; do
+              ZIP_PATH="$zip_file"
+              break
+            done < <(find . -type f -name 'Manhwa_Hunter_v10_Search_Only.zip' -not -path './.git/*' -print)
+
+            if [[ -n "$ZIP_PATH" ]]; then
+              mkdir -p "$RUNNER_TEMP/manhwa-hunter-v10"
+              unzip -oq "$ZIP_PATH" -d "$RUNNER_TEMP/manhwa-hunter-v10"
+              while IFS= read -r settings_file; do
+                candidate="$(dirname "$settings_file")"
+                if [[ -f "$candidate/app/build.gradle.kts" ]]; then
+                  PROJECT_PATH="$candidate"
+                  break
+                fi
+              done < <(find "$RUNNER_TEMP/manhwa-hunter-v10" -type f -name settings.gradle.kts -print)
+            fi
+          fi
+
+          if [[ -z "$PROJECT_PATH" ]]; then
+            echo '::error::Could not find the Android project. Commit the extracted mhv5 folder OR Manhwa_Hunter_v10_Search_Only.zip to your GitHub repository.'
+            echo 'Repository files (first 200):'
+            find . -maxdepth 4 -type f -not -path './.git/*' | sort | head -200
+            exit 1
+          fi
+
+          PROJECT_PATH="$(cd "$PROJECT_PATH" && pwd)"
+          test -f "$PROJECT_PATH/settings.gradle.kts"
+          test -f "$PROJECT_PATH/app/build.gradle.kts"
+          echo "project_dir=$PROJECT_PATH" >> "$GITHUB_OUTPUT"
+          echo "Building project from: $PROJECT_PATH"
+
+      - name: Build debug APK
+        shell: bash
+        env:
+          PROJECT_DIR: ${{ steps.project.outputs.project_dir }}
+        run: |
+          set -euo pipefail
+          gradle -p "$PROJECT_DIR" --no-daemon --stacktrace clean assembleDebug
+          APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
+          if [[ ! -f "$APK" ]]; then
+            echo "::error::Build completed but expected APK was not found: $APK"
+            find "$PROJECT_DIR/app/build/outputs" -maxdepth 5 -type f -print 2>/dev/null || true
+            exit 1
+          fi
+          echo "APK created: $APK"
+
+      - name: Upload debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Manhwa-Hunter-v10-debug-APK
+          path: ${{ steps.project.outputs.project_dir }}/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
